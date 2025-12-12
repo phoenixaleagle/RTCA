@@ -1,48 +1,96 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
 
 const app = express();
-const server = http.createServer(app); 
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+const MONGODB_URI = 'mongodb://localhost:27017/chatAppDB';
 
 const io = new Server(server, {
-  cors: {
-    origin: "*", // Android client အတွက် CORS ခွင့်ပြုခြင်း
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const messages = []; // ယာယီ မက်ဆေ့ချ် သိမ်းဆည်းရန်
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('MongoDB Connected Successfully'))
+  .catch(err => console.error('MongoDB Connection Error:', err));
+
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  created_at: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const messages = [];
 
 app.get('/', (req, res) => {
-  res.status(200).send('✅ Real-Time Chat Server is running.');
+  res.status(200).send('Real-Time Chat Server running');
 });
 
 io.on('connection', (socket) => {
-  console.log(`👤 User connected: ${socket.id}`);
-  
-  socket.emit('initial messages', messages); // ချိတ်ဆက်သူအသစ်ကို message အဟောင်းများ ပို့ခြင်း
+  console.log(`User connected: ${socket.id}`);
+
+  socket.on('signup', async (data, callback) => {
+    const { username, password } = data;
+    if (!username || !password) return callback({ success: false, message: 'Username and password required' });
+
+    try {
+      const existingUser = await User.findOne({ username });
+      if (existingUser) return callback({ success: false, message: 'Username already exists' });
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const newUser = new User({ username, password: hashedPassword });
+      await newUser.save();
+
+      callback({ success: true, message: 'Signup successful' });
+    } catch (error) {
+      callback({ success: false, message: 'Server error' });
+    }
+  });
+
+  socket.on('login', async (data, callback) => {
+    const { username, password } = data;
+
+    try {
+      const user = await User.findOne({ username });
+      if (!user) return callback({ success: false, message: 'Invalid username' });
+
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) return callback({ success: false, message: 'Invalid password' });
+
+      socket.username = username;
+      callback({ success: true, message: 'Login successful', username });
+      socket.emit('initial messages', messages);
+
+    } catch (error) {
+      callback({ success: false, message: 'Server error' });
+    }
+  });
 
   socket.on('chat message', (msg) => {
-    const fullMessage = {
-        user: msg.user || "Anonymous",
-        text: msg.text,
-        timestamp: Date.now()
-    };
-    
-    messages.push(fullMessage);
-    console.log(`📬 Message received from ${fullMessage.user}: ${fullMessage.text}`);
+    if (!socket.username) {
+      socket.emit('auth error', 'Please login first');
+      return;
+    }
 
-    // ချိတ်ဆက်ထားသူ အားလုံးဆီသို့ ထုတ်လွှင့်ခြင်း
+    const fullMessage = {
+      user: socket.username,
+      text: msg.text,
+      timestamp: Date.now()
+    };
+
+    messages.push(fullMessage);
     io.emit('chat message', fullMessage);
   });
 
   socket.on('disconnect', () => {
-    console.log(`🚪 User disconnected: ${socket.id}`);
+    console.log(`User disconnected: ${socket.id}`);
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 Chat server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
