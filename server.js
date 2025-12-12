@@ -6,7 +6,7 @@ const bcrypt = require('bcrypt');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 const MONGODB_URI = 'mongodb+srv://chatapp:ylh43181864cmk@chatapp.nzy8ktl.mongodb.net/?appName=chatapp';
 
 const io = new Server(server, {
