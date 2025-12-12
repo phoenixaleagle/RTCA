@@ -7,11 +7,10 @@ const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 // Render environment (MongoDB)
-const MONGODB_URI = process.env.MONGODB_URI || 
-"mongodb+srv://[YOUR_USERNAME]:[YOUR_PASSWORD]@cluster0.mongodb.net/chatapp";
+const MONGODB_URI = "mongodb+srv://chatapp:ylh43181864cmk@chatapp.nzy8ktl.mongodb.net/?appName=chatapp";
 
 const io = new Server(server, {
   cors: {
