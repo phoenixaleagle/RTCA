@@ -3,13 +3,13 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const { Schema } = mongoose;
+const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = 3000;
-const MONGODB_URI = 'mongodb+srv://chatapp:ylh43181864cmk@chatapp.nzy8ktl.mongodb.net/?appName=chatapp';
 
+const MONGODB_URI = 'mongodb+srv://chatapp:ylh43181864cmk@chatapp.nzy8ktl.mongodb.net/?appName=chatapp';
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -17,97 +17,79 @@ const io = new Server(server, {
   }
 });
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('MongoDB Connected Successfully!'))
-  .catch(err => console.error('MongoDB Connection Error:', err));
+const messages = [];
+const userSocketMap = new Map();
 
-const userSchema = new Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  created_at: { type: Date, default: Date.now }
-});
-const User = mongoose.model('User', userSchema);
-
-const messageSchema = new Schema({
-  user: { type: String, required: true },
-  text: { type: String, required: true },
-  timestamp: { type: Date, default: Date.now }
-});
-const MessageModel = mongoose.model('Message', messageSchema);
+try {
+  mongoose
+    .connect(MONGODB_URI)
+    .then(() => console.log('MongoDB Connected Successfully'))
+    .catch(err => console.error('MongoDB Connection Error:', err));
+} catch (e) {
+  console.error("MongoDB connection error");
+}
 
 app.get('/', (req, res) => {
-  res.status(200).send('Real-Time Chat Server is running with Mongoose.');
+  res.status(200).send('Real-Time Chat Server is running.');
 });
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
+  socket.emit('initial messages', messages);
+
   socket.on('signup', async (data, callback) => {
-    const { username, password } = data;
-    if (!username || !password) return callback({ success: false, message: 'Username နှင့် Password လိုအပ်ပါသည်။' });
-
     try {
-      const existingUser = await User.findOne({ username });
-      if (existingUser) return callback({ success: false, message: 'ဤ Username ရှိပြီးသား ဖြစ်ပါသည်။' });
-
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-
-      const newUser = new User({ username, password: hashedPassword });
-      await newUser.save();
-
-      callback({ success: true, message: 'မဆရ(၁၀)မှ ကြိုဆိုပါသည်။' });
+      callback({ success: true, message: "Signup success" });
+      console.log(`New user signed up: ${data.username}`);
     } catch (error) {
-      callback({ success: false, message: 'Server Busy' });
+      console.error('Signup Error:', error);
+      callback({ success: false, message: "Signup error" });
     }
   });
 
   socket.on('login', async (data, callback) => {
-    const { username, password } = data;
+    const username = data.username;
+    const password = data.password;
 
     try {
-      const user = await User.findOne({ username });
-      if (!user) return callback({ success: false, message: 'Username မမှန်ကန်ပါ။' });
+      if (!username || !password) {
+        return callback({ success: false, message: "Invalid data" });
+      }
 
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return callback({ success: false, message: 'Password မမှန်ကန်ပါ။' });
-
+      userSocketMap.set(socket.id, username);
       socket.username = username;
 
-      const historyMessages = await MessageModel.find().sort({ timestamp: 1 }).lean();
-
-      socket.emit('initial messages', historyMessages);
-      callback({ success: true, message: 'Welcome' ,  username: username });
-
+      console.log(`User logged in: ${username} (${socket.id})`);
+      callback({ success: true, message: "Login success", username: username });
     } catch (error) {
-      callback({ success: false, message: 'Server Error' });
+      console.error('Login Error:', error);
+      callback({ success: false, message: "Login error" });
     }
   });
 
-  socket.on('chat message', async (msg) => {
-    if (!socket.username) {
-      socket.emit('auth error', 'AuthError');
-      return;
-    }
+  socket.on('chat message', (msg) => {
+    const senderUsername = userSocketMap.get(socket.id) || msg.user || "Anonymous";
 
     const fullMessage = {
-      user: socket.username,
+      user: senderUsername,
       text: msg.text,
       timestamp: Date.now()
     };
 
-    try {
-      const newMessage = new MessageModel(fullMessage);
-      await newMessage.save();
-
-      io.emit('chat message', fullMessage);
-    } catch (error) {
-      socket.emit('server error', 'ServerError');
-    }
+    messages.push(fullMessage);
+    console.log(`Message from ${fullMessage.user}: ${fullMessage.text}`);
+    io.emit('chat message', fullMessage);
   });
 
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id} (User: ${socket.username || 'N/A'})`);
+    const username = userSocketMap.get(socket.id);
+    if (username) {
+      userSocketMap.delete(socket.id);
+      console.log(`User disconnected: ${socket.id} (User: ${username})`);
+    } else {
+      console.log(`User disconnected: ${socket.id}`);
+    }
   });
 });
 
