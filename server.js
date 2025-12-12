@@ -7,52 +7,54 @@ const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-const MONGODB_URI = 'mongodb+srv://chatapp:ylh43181864cmk@chatapp.nzy8ktl.mongodb.net/?appName=chatapp';
+// Render environment (MongoDB)
+const MONGODB_URI = process.env.MONGODB_URI || 
+"mongodb+srv://[YOUR_USERNAME]:[YOUR_PASSWORD]@cluster0.mongodb.net/chatapp";
+
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ["websocket"],   // 🚨 FIX FOR ANDROID + RENDER
+  allowEIO3: true
 });
 
 const messages = [];
 const userSocketMap = new Map();
 
-try {
-  mongoose
-    .connect(MONGODB_URI)
-    .then(() => console.log('MongoDB Connected Successfully'))
-    .catch(err => console.error('MongoDB Connection Error:', err));
-} catch (e) {
-  console.error("MongoDB connection error");
-}
+// MongoDB Connection
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log("MongoDB Connected"))
+  .catch(err => console.log("Mongo Error:", err));
 
-app.get('/', (req, res) => {
-  res.status(200).send('Real-Time Chat Server is running.');
+app.get("/", (req, res) => {
+  res.send("Chat Server is running.");
 });
 
-io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+// Socket.io
+io.on("connection", (socket) => {
+  console.log("User Connected:", socket.id);
 
-  socket.emit('initial messages', messages);
+  socket.emit("initial messages", messages);
 
-  socket.on('signup', async (data, callback) => {
+  // Signup
+  socket.on("signup", async (data, callback) => {
     try {
-      callback({ success: true, message: "Signup success" });
-      console.log(`New user signed up: ${data.username}`);
-    } catch (error) {
-      console.error('Signup Error:', error);
+      return callback({ success: true, message: "Signup success" });
+    } catch (err) {
       callback({ success: false, message: "Signup error" });
     }
   });
 
-  socket.on('login', async (data, callback) => {
-    const username = data.username;
-    const password = data.password;
-
+  // Login
+  socket.on("login", async (data, callback) => {
     try {
+      const username = data.username;
+      const password = data.password;
+
       if (!username || !password) {
         return callback({ success: false, message: "Invalid data" });
       }
@@ -60,39 +62,41 @@ io.on('connection', (socket) => {
       userSocketMap.set(socket.id, username);
       socket.username = username;
 
-      console.log(`User logged in: ${username} (${socket.id})`);
-      callback({ success: true, message: "Login success", username: username });
-    } catch (error) {
-      console.error('Login Error:', error);
-      callback({ success: false, message: "Login error" });
+      return callback({
+        success: true,
+        message: "Login success",
+        username
+      });
+
+    } catch (err) {
+      return callback({ success: false, message: "Login error" });
     }
   });
 
-  socket.on('chat message', (msg) => {
-    const senderUsername = userSocketMap.get(socket.id) || msg.user || "Anonymous";
+  // Chat Message
+  socket.on("chat message", (msg) => {
+    const sender = userSocketMap.get(socket.id) || msg.user || "Unknown";
 
     const fullMessage = {
-      user: senderUsername,
+      user: sender,
       text: msg.text,
       timestamp: Date.now()
     };
 
     messages.push(fullMessage);
-    console.log(`Message from ${fullMessage.user}: ${fullMessage.text}`);
-    io.emit('chat message', fullMessage);
+
+    io.emit("chat message", fullMessage);
   });
 
-  socket.on('disconnect', () => {
-    const username = userSocketMap.get(socket.id);
-    if (username) {
+  // Disconnect
+  socket.on("disconnect", () => {
+    if (userSocketMap.has(socket.id)) {
+      console.log("User disconnected:", userSocketMap.get(socket.id));
       userSocketMap.delete(socket.id);
-      console.log(`User disconnected: ${socket.id} (User: ${username})`);
-    } else {
-      console.log(`User disconnected: ${socket.id}`);
     }
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`Chat server listening on port ${PORT}`);
+  console.log("Server running on port", PORT);
 });
